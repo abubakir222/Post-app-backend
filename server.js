@@ -18,34 +18,29 @@ const notificationRouter = require('./src/Router/notlificationRouter');
 const app = express();
 const server = http.createServer(app);
 
-const io = socketIo(server, {
-  cors: {
-    origin: 'https://odil-post-applar.netlify.app/',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    credentials: true,
+const allowedOrigins = [
+  'https://odil-post-app.netlify.app',
+];
+
+// CORS middleware
+app.use(cors({
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('Not allowed by CORS'));
+    }
   },
-});
+  credentials: true,
+}));
 
-// Socket global
-global._io = io;
-const onlineUsers = new Map();
-global.onlineUsers = onlineUsers;
-
-// Fayl upload va JSON parser
 app.use(expressFileUpload({ useTempFiles: true, tempFileDir: '/tmp/' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// CORS
-app.use(cors({
-  origin: 'https://odil-post-applar.netlify.app/',
-  credentials: true,
-}));
-
-// Statik fayl (agar kerak bo‘lsa)
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ROUTERLAR
 app.use('/api', authRouter);
 app.use('/api/user', userRouter);
 app.use('/api/admin', adminRouter);
@@ -53,7 +48,18 @@ app.use('/api/post', postRouter);
 app.use('/api/comment', commentRouter);
 app.use('/api/notifications', notificationRouter);
 
-// SOCKET IO
+const io = socketIo(server, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+    credentials: true,
+  },
+});
+
+global._io = io;
+const onlineUsers = new Map();
+global.onlineUsers = onlineUsers;
+
 io.on('connection', (socket) => {
   socket.on('join', (userId) => {
     if (userId) {
@@ -78,7 +84,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// MONGO
 const MONGO_URL = process.env.MONGO_URL;
 const PORT = process.env.PORT || 4000;
 
@@ -94,7 +99,6 @@ mongoose
     process.exit(1);
   });
 
-// UNIVERSAL ERROR HANDLER (eng oxirida)
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ message: 'Serverda xato yuz berdi' });
