@@ -8,7 +8,6 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 dotenv.config();
 
-// Routerlar
 const authRouter = require('./src/Router/authRouter');
 const adminRouter = require('./src/Router/adminRouter');
 const postRouter = require('./src/Router/postRouter');
