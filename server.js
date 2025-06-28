@@ -19,13 +19,14 @@ const app = express();
 const server = http.createServer(app);
 
 const allowedOrigins = [
-  'https://odil-post-social-app.netlify.app', 
+  'http://odil-social-post-app.netlify.app',
+  'http://localhost:3000',
 ];
 
-// Express uchun CORS
+// CORS middleware
 app.use(cors({
   origin: function(origin, callback) {
-    if (!origin) return callback(null, true); 
+    if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     } else {
@@ -60,7 +61,6 @@ global._io = io;
 const onlineUsers = new Map();
 global.onlineUsers = onlineUsers;
 
-// SOCKET IO
 io.on('connection', (socket) => {
   socket.on('join', (userId) => {
     if (userId) {
@@ -85,7 +85,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// MONGO
 const MONGO_URL = process.env.MONGO_URL;
 const PORT = process.env.PORT || 4000;
 
@@ -101,7 +100,6 @@ mongoose
     process.exit(1);
   });
 
-// UNIVERSAL ERROR HANDLER (eng oxirida)
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ message: 'Serverda xato yuz berdi' });
