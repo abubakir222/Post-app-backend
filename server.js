@@ -19,8 +19,8 @@ const app = express();
 const server = http.createServer(app);
 
 const allowedOrigins = [
-  'http://odilboy-social-post-app.netlify.app',
-  'http://localhost:3000',
+  'https://odilboy-social-post-app.netlify.app',
+  'https://localhost:3000',
 ];
 
 // CORS middleware
