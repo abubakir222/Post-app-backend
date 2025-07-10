@@ -23,7 +23,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: ['http://localhost:3000'],
+        origin: ['odil-post-app-zor.netlify.app'],
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
         credentials: true,
     },
@@ -31,7 +31,7 @@ const io = new Server(server, {
 });
 
 // CORS configuration
-const allowedOrigins = ['http://localhost:3000'];
+const allowedOrigins = ['odil-post-app-zor.netlify.app'];
 app.use(
     cors({
         origin: (origin, callback) => {
