@@ -1,5 +1,5 @@
-const Post = require('../Model/postModel');
 const Comment = require('../Model/commentsModel');
+const Post = require('../Model/postModel');
 const Notification = require('../Model/notificatoinModel');
 const User = require('../Model/UserModel');
 
@@ -7,6 +7,8 @@ const commentCtrl = {
   createComment: async (req, res) => {
     try {
       const { postId, text } = req.body;
+      const userId = req.user._id;
+
       if (!postId || !text) {
         return res.status(400).json({ message: 'postId va text majburiy' });
       }
@@ -18,7 +20,7 @@ const commentCtrl = {
 
       const newComment = await Comment.create({
         postId,
-        userId: req.user._id,
+        userId,
         text,
       });
 
@@ -27,16 +29,14 @@ const commentCtrl = {
       });
 
       const populatedComment = await Comment.findById(newComment._id)
-        .populate('userId', 'username profileImage');
+        .populate('userId', 'username profileImage')
+        .lean();
 
-      // NOTIFICATION: faqat bitta va username DBdan olib yuboriladi!
-      if (req.user._id.toString() !== post.userId.toString()) {
-        const sender = await User.findById(req.user._id);
-        const senderUsername = sender?.username || sender?.name || 'User';
-
-        // Comment notification: 1 comment = 1 notification
+      if (post.userId && userId.toString() !== post.userId.toString()) {
+        const sender = await User.findById(userId);
+        const senderUsername = sender?.username || 'User';
         const existing = await Notification.findOne({
-          senderId: req.user._id,
+          senderId: userId,
           receiverId: post.userId,
           type: 'comment',
           postId,
@@ -44,33 +44,27 @@ const commentCtrl = {
         });
         if (!existing) {
           const newNotification = await Notification.create({
-            senderId: req.user._id,
+            senderId: userId,
             receiverId: post.userId,
             type: 'comment',
             message: `${senderUsername} sizning postingizga komment yozdi: "${text.substring(0, 20)}..."`,
-            postId: postId,
+            postId,
             commentId: newComment._id,
             isRead: false,
           });
-
           const populatedNotification = await Notification.findById(newNotification._id)
             .populate('senderId', 'username profileImage')
             .populate('postId', 'content postImage')
-            .populate('commentId', 'text');
-
-          const receiverSocketId = global.onlineUsers.get(post.userId.toString());
-          if (receiverSocketId) {
-            global._io.to(receiverSocketId).emit('newNotification', populatedNotification);
-          }
+            .populate('commentId', 'text')
+            .lean();
+          req.io.to(post.userId.toString()).emit('newNotification', populatedNotification);
         }
       }
 
-      // Commentni frontga jo‘natish
-      global._io.emit('newComment', populatedComment);
-
+      req.io.emit('newComment', populatedComment);
       res.status(201).json(populatedComment);
     } catch (err) {
-      res.status(500).json({ message: 'Server xatosi: Komment yaratishda muammo' });
+      res.status(500).json({ message: 'Server xatosi: Komment yaratishda muammo', error: err.message });
     }
   },
 
@@ -78,10 +72,11 @@ const commentCtrl = {
     try {
       const comments = await Comment.find({ postId: req.params.postId })
         .populate('userId', 'username profileImage')
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .lean();
       res.json(comments);
     } catch (err) {
-      res.status(500).json({ message: 'Server xatosi: Kommentlarni olishda muammo' });
+      res.status(500).json({ message: 'Server xatosi: Kommentlarni olishda muammo', error: err.message });
     }
   },
 
@@ -89,6 +84,8 @@ const commentCtrl = {
     try {
       const { id } = req.params;
       const { text } = req.body;
+      const userId = req.user._id;
+
       if (!text) {
         return res.status(400).json({ message: 'Text majburiy' });
       }
@@ -98,32 +95,34 @@ const commentCtrl = {
         return res.status(404).json({ message: 'Komment topilmadi' });
       }
 
-      if (comment.userId.toString() !== req.user._id.toString()) {
+      if (comment.userId.toString() !== userId.toString()) {
         return res.status(403).json({ message: 'Faqat o‘zingizning commentingizni yangilay olasiz' });
       }
 
       comment.text = text;
       await comment.save();
 
-      const populatedComment = await Comment.findById(id).populate(
-        'userId',
-        'username profileImage'
-      );
+      const populatedComment = await Comment.findById(id)
+        .populate('userId', 'username profileImage')
+        .lean();
+      req.io.emit('updatedComment', { ...populatedComment, postId: comment.postId });
       res.json(populatedComment);
     } catch (err) {
-      res.status(500).json({ message: 'Server xatosi: Komment yangilashda muammo' });
+      res.status(500).json({ message: 'Server xatosi: Komment yangilashda muammo', error: err.message });
     }
   },
 
   deleteComment: async (req, res) => {
     try {
       const { id } = req.params;
+      const userId = req.user._id;
+
       const comment = await Comment.findById(id);
       if (!comment) {
         return res.status(404).json({ message: 'Komment topilmadi' });
       }
 
-      if (comment.userId.toString() !== req.user._id.toString()) {
+      if (comment.userId.toString() !== userId.toString()) {
         return res.status(403).json({ message: 'Faqat o‘zingizning commentingizni o‘chira olasiz' });
       }
 
@@ -132,9 +131,10 @@ const commentCtrl = {
         $pull: { comments: comment._id },
       });
 
+      req.io.emit('deletedComment', { postId: comment.postId, commentId: id });
       res.json({ message: 'Komment o‘chirildi' });
     } catch (err) {
-      res.status(500).json({ message: 'Server xatosi: Komment o‘chirishda muammo' });
+      res.status(500).json({ message: 'Server xatosi: Komment o‘chirishda muammo', error: err.message });
     }
   },
 };

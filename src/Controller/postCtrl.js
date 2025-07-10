@@ -57,7 +57,7 @@ const postCtrl = {
           path: 'comments',
           populate: { path: 'userId', select: 'username profileImage' },
         })
-        .sort({ createdAt: -1});
+        .sort({ createdAt: -1 });
 
       res.status(200).json(posts);
     } catch (err) {
@@ -106,20 +106,16 @@ const postCtrl = {
     }
   },
 
+  // ADMIN: Post update
   updatePost: async (req, res) => {
     try {
       const post = await Post.findById(req.params.id);
-      if (!post) {
-        return res.status(404).json({ message: 'Post topilmadi' });
-      }
-      if (post.userId.toString() !== req.user._id.toString()) {
-        return res.status(403).json({ message: 'Faqat o‘zingizning postingizni yangilay olasiz' });
-      }
+      if (!post) return res.status(404).json({ message: 'Post topilmadi' });
 
       post.content = req.body.content || post.content;
       if (req.files && req.files.postImage) {
-        if (post.postImage && post.postImage.filename) {
-          await cloudinary.uploader.destroy(post.postImage.filename);
+        if (post.postImage && post.postImage.public_id) {
+          await cloudinary.uploader.destroy(post.postImage.public_id).catch(() => { });
         }
         const file = req.files.postImage;
         const result = await cloudinary.uploader.upload(file.tempFilePath, {
@@ -127,20 +123,16 @@ const postCtrl = {
           resource_type: 'auto',
         });
         fs.unlinkSync(file.tempFilePath);
-        post.postImage = { url: result.secure_url, filename: result.public_id };
+        post.postImage = { url: result.secure_url, public_id: result.public_id }; // filename o'rniga public_id
       }
       await post.save();
 
       const populatedPost = await Post.findById(req.params.id)
         .populate('userId', 'username profileImage')
-        .populate({
-          path: 'comments',
-          populate: { path: 'userId', select: 'username profileImage' },
-        });
+        .populate({ path: 'comments', populate: { path: 'userId', select: 'username profileImage' } });
 
       res.status(200).json({ post: populatedPost });
     } catch (err) {
-      console.error('updatePost error:', err.message, err.stack);
       res.status(500).json({ message: 'Server xatosi: Post yangilashda muammo', error: err.message });
     }
   },
@@ -194,17 +186,17 @@ const postCtrl = {
       if (!post) {
         return res.status(404).json({ message: 'Post topilmadi' });
       }
-  
+
       const userId = req.user?._id;
       if (!userId) {
         return res.status(401).json({ message: 'Foydalanuvchi autentifikatsiyasi topilmadi' });
       }
-  
+
       const isLiked = post.likes.includes(userId.toString());
-  
+
       if (isLiked) {
         post.likes = post.likes.filter((id) => id.toString() !== userId.toString());
-  
+
         // (optional) Notificationni o‘chirish ham mumkin
         await Notification.deleteOne({
           senderId: userId,
@@ -214,12 +206,12 @@ const postCtrl = {
         });
       } else {
         post.likes.push(userId);
-  
+
         if (post.userId.toString() !== userId.toString()) {
           // --- ASOSIY O‘ZGARISH: USERNAME-ni DBdan olish ---
           const sender = await require('../Model/UserModel').findById(userId);
           const senderUsername = sender?.username || sender?.name || "User";
-  
+
           const existingNotification = await Notification.findOne({
             senderId: userId,
             receiverId: post.userId,
@@ -234,11 +226,11 @@ const postCtrl = {
               message: `${senderUsername} sizning postingizga like bosdi: "${post.content.substring(0, 20)}..."`,
               postId: post._id,
             });
-  
+
             const populatedNotification = await Notification.findById(newNotification._id)
               .populate('senderId', 'username profileImage')
               .populate('postId', 'content postImage');
-  
+
             const receiverSocketId = global.onlineUsers.get(post.userId.toString());
             if (receiverSocketId) {
               global._io.to(receiverSocketId).emit('newNotification', populatedNotification);
@@ -246,16 +238,16 @@ const postCtrl = {
           }
         }
       }
-  
+
       await post.save();
-  
+
       const populatedPost = await Post.findById(postId)
         .populate('userId', 'username profileImage')
         .populate({
           path: 'comments',
           populate: { path: 'userId', select: 'username profileImage' },
         });
-  
+
       res.status(200).json({ post: populatedPost });
     } catch (err) {
       res.status(500).json({ message: 'Server xatosi: Like qo‘yishda muammo', error: err.message });
@@ -266,17 +258,17 @@ const postCtrl = {
     try {
       const post = await Post.findById(req.params.id);
       if (!post) return res.status(404).json({ msg: "Post topilmadi" });
-  
+
       post.likes = post.likes.filter(id => id.toString() !== req.user._id.toString());
       await post.save();
-  
+
       await Notification.deleteOne({
         senderId: req.user._id,
         receiverId: post.userId,
         type: 'like',
         postId: post._id,
       });
-  
+
       res.status(200).json(post);
     } catch (err) {
       res.status(500).json({ msg: err.message });

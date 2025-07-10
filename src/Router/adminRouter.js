@@ -1,9 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const adminCtrl = require('../Controller/adminCtrl');
-const auth = require('../middleware/authMiddleware'); 
+const auth = require('../middleware/authMiddleware');
 
-// Faqat adminlar uchun
 router.use(auth, (req, res, next) => {
   if (req.user.role !== 101) return res.status(403).json({ message: 'Faqat admin uchun!' });
   next();
@@ -25,5 +24,7 @@ router.put('/comment/:id', adminCtrl.updateComment);
 router.get('/top/likers', adminCtrl.getTopLikers);
 router.get('/top/commenters', adminCtrl.getTopCommenters);
 router.get('/top/posters', adminCtrl.getTopPosters);
+
+router.delete('/remove-image/:type/:id', adminCtrl.removeImage);
 
 module.exports = router;

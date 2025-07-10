@@ -9,20 +9,16 @@ const authCtrl = {
       if (!email || !password) {
         return res.status(400).json({ message: "Hamma qatorlarni to‘ldiring" });
       }
-      // password maydonini ham select qilamiz!
       const user = await User.findOne({ email }).select('+password');
       if (!user) return res.status(400).json({ message: "Email yoki parol noto‘g‘ri" });
       if (!user.password) return res.status(500).json({ message: "Parol bazada mavjud emas" });
 
-      // Parolni tekshir
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) return res.status(400).json({ message: "Email yoki parol noto‘g‘ri" });
 
-      // Parolni javobdan olib tashla
       const userData = user.toObject();
       delete userData.password;
 
-      // JWT token yaratamiz
       const token = JWT.sign(
         { id: user._id, role: user.role },
         process.env.JWT_SECRET_KEY || 'secret',
@@ -46,7 +42,6 @@ const authCtrl = {
       if (!username || !email || !password) {
         return res.status(400).json({ message: "Barcha qatorlarni to‘ldiring" });
       }
-      // Email yoki username bandligi
       const [userExists, usernameExists] = await Promise.all([
         User.findOne({ email }),
         User.findOne({ username }),
@@ -54,10 +49,13 @@ const authCtrl = {
       if (userExists) return res.status(403).json({ message: "Bu email allaqachon mavjud" });
       if (usernameExists) return res.status(403).json({ message: "Bu username allaqachon mavjud" });
 
+      // Parolni hash qilish
+      const hashedPassword = await bcrypt.hash(password, 10);
+
       const newUser = new User({
         username,
         email,
-        password, // FAQAT STRING! Hash QILMAYMIZ!
+        password: hashedPassword,
         surname,
         job,
         hobby

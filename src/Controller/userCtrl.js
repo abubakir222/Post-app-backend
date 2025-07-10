@@ -14,52 +14,17 @@ cloudinary.config({
 });
 
 const userCtrl = {
-  deleteUser: async (req, res) => {
-    try {
-      const userId = req.params.id;
-      if (req.user.role !== 101 && req.user._id.toString() !== userId) {
-        return res.status(403).json({ message: 'Sizda bu foydalanuvchini o‘chirish huquqi yo‘q' });
-      }
-      const user = await User.findById(userId);
-      if (!user) return res.status(404).json({ message: 'Foydalanuvchi topilmadi' });
-
-      const posts = await Post.find({ userId });
-      await Promise.all(posts.map(async post => {
-        if (post.postImage && post.postImage.filename) {
-          await cloudinary.uploader.destroy(post.postImage.filename).catch(() => { });
-        }
-        await Comment.deleteMany({ postId: post._id });
-        await Post.findByIdAndDelete(post._id);
-      }));
-
-      await Promise.all([
-        Comment.deleteMany({ userId }),
-        Post.updateMany({ likes: userId }, { $pull: { likes: userId } }),
-        User.updateMany({ followers: userId }, { $pull: { followers: userId } }),
-        User.updateMany({ following: userId }, { $pull: { following: userId } }),
-        Notification.deleteMany({ $or: [{ senderId: userId }, { receiverId: userId }] })
-      ]);
-
-      if (user.profileImage && user.profileImage.public_id) {
-        await cloudinary.uploader.destroy(user.profileImage.public_id).catch(() => { });
-      }
-      await User.findByIdAndDelete(userId);
-
-      res.status(200).json({ message: 'Foydalanuvchi va unga tegishli barcha maʼlumotlar o‘chirildi' });
-    } catch (error) {
-      console.error('Delete User Error:', error.stack);
-      res.status(500).json({ message: 'Serverda xatolik: ' + error.message });
-    }
-  },
-
   updateUser: async (req, res) => {
     try {
+      console.log('So‘rov keldi:', { params: req.params, body: req.body, files: req.files });
       const userId = req.params.id;
       if (req.user.role !== 101 && req.user._id.toString() !== userId) {
         return res.status(403).json({ message: "Sizda bu foydalanuvchini yangilash huquqi yo‘q" });
       }
       const user = await User.findById(userId).select('+password');
       if (!user) return res.status(404).json({ message: 'Foydalanuvchi topilmadi' });
+
+      console.log('Foydalanuvchi ma\'lumotlari:', user);
 
       const [emailExists, usernameExists] = await Promise.all([
         req.body.email && req.body.email !== user.email
@@ -79,30 +44,32 @@ const userCtrl = {
       if (req.body.hobby !== undefined) user.hobby = req.body.hobby;
 
       if (req.files && req.files.profileImage) {
-        if (user.profileImage && user.profileImage.public_id) {
-          await cloudinary.uploader.destroy(user.profileImage.public_id).catch(() => { });
+        try {
+          console.log('Rasm yuklash jarayoni boshlandi:', req.files.profileImage);
+          if (user.profileImage && user.profileImage.public_id) {
+            console.log('Eski rasmni o‘chirish:', user.profileImage.public_id);
+            const destroyResult = await cloudinary.uploader.destroy(user.profileImage.public_id);
+            console.log('O‘chirish natijasi:', destroyResult);
+          }
+          const file = req.files.profileImage;
+          console.log('Yuklanayotgan fayl:', file);
+          const result = await cloudinary.uploader.upload(file.tempFilePath, {
+            folder: 'profiles',
+            resource_type: 'auto',
+          });
+          console.log('Yuklash natijasi:', result);
+          await fs.promises.unlink(file.tempFilePath).catch(err => {
+            console.error('Vaqtincha faylni o‘chirishda xato:', err.message);
+          });
+          user.profileImage = { url: result.secure_url, public_id: result.public_id };
+        } catch (cloudinaryError) {
+          console.error('Cloudinary xatosi:', cloudinaryError.message, cloudinaryError.stack);
+          return res.status(500).json({ message: 'Cloudinary bilan rasm yuklashda xatolik', error: cloudinaryError.message });
         }
-        const file = req.files.profileImage;
-        const result = await cloudinary.uploader.upload(file.tempFilePath, {
-          folder: 'profiles',
-          resource_type: 'auto',
-        });
-        await fs.promises.unlink(file.tempFilePath);
-        user.profileImage = { url: result.secure_url, public_id: result.public_id };
       }
 
-      if (req.body.newPassword) {
-        if (!req.body.currentPassword) {
-          return res.status(400).json({ message: 'Joriy parolni kiriting' });
-        }
-        const isMatch = await bcrypt.compare(req.body.currentPassword, user.password);
-        if (!isMatch) {
-          return res.status(400).json({ message: 'Joriy parol notoʻgʻri' });
-        }
-        if (req.body.newPassword.length < 4) {
-          return res.status(400).json({ message: "Yangi parol kamida 4 ta belgidan iborat bo‘lishi kerak" });
-        }
-        user.password = req.body.newPassword;
+      if (req.body.password && req.body.password.length > 0) {
+        user.password = await bcrypt.hash(req.body.password, 10);
       }
 
       await user.save();
@@ -110,9 +77,93 @@ const userCtrl = {
       delete userToReturn.password;
       res.status(200).json({ message: 'Foydalanuvchi muvaffaqiyatli yangilandi', user: userToReturn });
     } catch (error) {
+      console.error('Foydalanuvchi yangilashda xato:', error.message, error.stack);
       if (error.code === 11000) {
         return res.status(400).json({ message: "Username yoki email band" });
       }
+      res.status(500).json({ message: 'Serverda xatolik: ' + error.message });
+    }
+  },
+
+  removeProfileImage: async (req, res) => {
+    try {
+      console.log('Profil rasmni o‘chirish so‘rovi:', { params: req.params });
+      const userId = req.params.id;
+      if (req.user.role !== 101 && req.user._id.toString() !== userId) {
+        return res.status(403).json({ message: "Sizda bu foydalanuvchi rasmini o‘chirish huquqi yo‘q" });
+      }
+      const user = await User.findById(userId);
+      if (!user) return res.status(404).json({ message: 'Foydalanuvchi topilmadi' });
+
+      if (user.profileImage && user.profileImage.public_id) {
+        console.log('Profil rasmni o‘chirish:', user.profileImage.public_id);
+        try {
+          const destroyResult = await cloudinary.uploader.destroy(user.profileImage.public_id);
+          console.log('O‘chirish natijasi:', destroyResult);
+          user.profileImage = { url: '', public_id: '' }; // Profil rasm maydonini bo‘shatish
+          await user.save();
+          res.status(200).json({ message: 'Profil rasmi muvaffaqiyatli o‘chirildi', user });
+        } catch (cloudinaryError) {
+          console.error('Cloudinary rasm o‘chirish xatosi:', cloudinaryError.message, cloudinaryError.stack);
+          return res.status(500).json({ message: 'Cloudinary bilan rasmni o‘chirishda xatolik', error: cloudinaryError.message });
+        }
+      } else {
+        console.log('O‘chirish uchun profil rasmi topilmadi');
+        return res.status(400).json({ message: 'Foydalanuvchida profil rasmi mavjud emas' });
+      }
+    } catch (error) {
+      console.error('Profil rasmni o‘chirishda xato:', error.message, error.stack);
+      res.status(500).json({ message: 'Serverda xatolik: ' + error.message });
+    }
+  },
+
+  deleteUser: async (req, res) => {
+    try {
+      const userId = req.params.id;
+      const user = await User.findById(userId);
+      if (!user) return res.status(404).json({ message: 'Foydalanuvchi topilmadi' });
+
+      if (req.user.role !== 101 && req.user._id.toString() !== userId) {
+        return res.status(403).json({ message: 'Sizda bu foydalanuvchini o‘chirish huquqi yo‘q' });
+      }
+
+      const posts = await Post.find({ userId });
+      await Promise.all(posts.map(async post => {
+        if (post.postImage && post.postImage.public_id) {
+          console.log('Post rasmni o‘chirish:', post.postImage.public_id);
+          try {
+            const destroyResult = await cloudinary.uploader.destroy(post.postImage.public_id);
+            console.log('Post rasm o‘chirish natijasi:', destroyResult);
+          } catch (cloudinaryError) {
+            console.error('Post rasmni o‘chirishda xato:', cloudinaryError.message);
+          }
+        }
+        await Comment.deleteMany({ postId: post._id });
+        await Post.findByIdAndDelete(post._id);
+      }));
+
+      await Promise.all([
+        Comment.deleteMany({ userId }),
+        Post.updateMany({ likes: userId }, { $pull: { likes: userId } }),
+        User.updateMany({ followers: userId }, { $pull: { followers: userId } }),
+        User.updateMany({ following: userId }, { $pull: { following: userId } }),
+        Notification.deleteMany({ $or: [{ senderId: userId }, { receiverId: userId }] })
+      ]);
+
+      if (user.profileImage && user.profileImage.public_id) {
+        console.log('Foydalanuvchi profil rasmni o‘chirish:', user.profileImage.public_id);
+        try {
+          const destroyResult = await cloudinary.uploader.destroy(user.profileImage.public_id);
+          console.log('Profil rasm o‘chirish natijasi:', destroyResult);
+        } catch (cloudinaryError) {
+          console.error('Profil rasmni o‘chirishda xato:', cloudinaryError.message);
+        }
+      }
+      await User.findByIdAndDelete(userId);
+
+      res.status(200).json({ message: 'Foydalanuvchi va unga tegishli barcha maʼlumotlar o‘chirildi' });
+    } catch (error) {
+      console.error('Foydalanuvchi o‘chirishda xato:', error.message, error.stack);
       res.status(500).json({ message: 'Serverda xatolik: ' + error.message });
     }
   },
@@ -258,7 +309,7 @@ const userCtrl = {
     }
   },
 
-   getLikedPosts: async (req, res) => {
+  getLikedPosts: async (req, res) => {
     try {
       const posts = await Post.find({ likes: req.params.id })
         .populate('userId', 'username profileImage')
