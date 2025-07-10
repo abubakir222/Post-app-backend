@@ -19,7 +19,7 @@ const app = express();
 const server = http.createServer(app);
 
 const allowedOrigins = [
-  'https://odilboy-social-post-app.netlify.app',
+  'https://odil-post-app-zor.netlify.app',
   'https://localhost:3000',
 ];
 
